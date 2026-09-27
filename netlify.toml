@@ -2,7 +2,7 @@
 [build]
   base = "frontend"
   command = "npm run build"
-  publish = ".next"
+  publish = "frontend/.next"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -16,3 +16,6 @@
   to = "https://cricket-auction-api.onrender.com/uploads/:splat"
   status = 200
   force = true
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

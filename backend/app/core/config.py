@@ -1,5 +1,4 @@
 from typing import Optional
-from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -30,15 +29,6 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None
     AWS_BUCKET_NAME: Optional[str] = None
-
-    @field_validator("DATABASE_URL")
-    @classmethod
-    def use_asyncpg_driver(cls, v: str) -> str:
-        # Hosted providers (Render, Heroku, Neon) hand out plain postgres:// URLs
-        for prefix in ("postgres://", "postgresql://"):
-            if v.startswith(prefix):
-                return "postgresql+asyncpg://" + v[len(prefix):]
-        return v
 
     @property
     def email_enabled(self) -> bool:

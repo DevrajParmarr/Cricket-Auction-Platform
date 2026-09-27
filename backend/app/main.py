@@ -37,9 +37,9 @@ app.include_router(organizer.router, prefix="/api")
 app.include_router(auction.router, prefix="/api")
 app.include_router(events.router, prefix="/api")
 
-# Serve uploaded files
-if os.path.exists(settings.UPLOAD_DIR):
-    app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+# Serve uploaded files (create the dir first so fresh containers still get the mount)
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 
 @app.get("/api/health")

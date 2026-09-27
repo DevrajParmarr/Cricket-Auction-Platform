@@ -1,0 +1,21 @@
+# Netlify — frontend only. Backend API runs on Render (see render.yaml)
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "frontend/.next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Baked into the Next.js bundle at build time
+  NEXT_PUBLIC_API_URL = "https://cricket-auction-api.onrender.com/api"
+  NEXT_PUBLIC_WS_URL = "wss://cricket-auction-api.onrender.com/api/auction/ws"
+
+# Locally stored profile photos are saved as relative /uploads/... paths on the backend
+[[redirects]]
+  from = "/uploads/*"
+  to = "https://cricket-auction-api.onrender.com/uploads/:splat"
+  status = 200
+  force = true
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

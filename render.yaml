@@ -1,0 +1,48 @@
+# Render Blueprint — backend API + PostgreSQL + Redis (free tier)
+# Frontend is deployed separately on Netlify (see netlify.toml)
+# Deploy: https://dashboard.render.com/blueprint/new?repo=https://github.com/DevrajParmarr/Cricket-Auction-Platform
+
+services:
+  - type: web
+    name: cricket-auction-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile.prod
+    dockerContext: ./backend
+    # Free tier has no pre-deploy step, so migrations run on every start
+    dockerCommand: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cricket-auction-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: cricket-auction-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GODMODE_SECRET
+        sync: false # entered in the Render dashboard at deploy time
+      - key: SITE_URL
+        value: https://cricket-auction-devraj.netlify.app
+      - key: UPLOAD_DIR
+        value: /app/uploads
+
+  - type: keyvalue
+    name: cricket-auction-redis
+    plan: free
+    region: singapore
+    ipAllowList: [] # internal connections only
+
+databases:
+  - name: cricket-auction-db
+    plan: free
+    region: singapore
+    databaseName: auction
+    user: auction

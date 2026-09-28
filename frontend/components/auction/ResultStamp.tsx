@@ -12,8 +12,8 @@ export default function ResultStamp({ result, size = "md", className = "" }: Pro
   return (
     <div
       aria-hidden="true"
-      className={`pointer-events-none select-none inline-block animate-stamp-in rounded-xl border-[5px] px-5 py-1 font-display font-extrabold uppercase tracking-[0.12em] backdrop-blur-[2px] ${
-        size === "xl" ? "text-7xl sm:text-8xl border-[7px] px-8" : "text-4xl sm:text-5xl"
+      className={`pointer-events-none select-none inline-block animate-stamp-in rounded-xl py-1 font-display font-extrabold uppercase tracking-[0.12em] backdrop-blur-[2px] ${
+        size === "xl" ? "text-7xl sm:text-8xl border-[7px] px-8" : "text-2xl sm:text-5xl border-4 sm:border-[5px] px-3 sm:px-5"
       } ${
         sold
           ? "border-emerald-400 text-emerald-300 bg-emerald-500/10 shadow-[0_0_40px_-8px_rgba(52,211,153,0.6)]"

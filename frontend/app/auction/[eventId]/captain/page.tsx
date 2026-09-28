@@ -1,14 +1,28 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { useAuctionStore } from "@/store/auction";
 import { useAuthStore } from "@/store/auth";
 import { AuctionSocket } from "@/lib/ws";
 import AuctionPlayerCard from "@/components/AuctionPlayerCard";
-import PlayerAvatar from "@/components/auction/PlayerAvatar";
+import TeamSummary from "@/components/TeamSummary";
+import BidPanel from "@/components/auction/BidPanel";
+import BottomTabs, { type TabItem } from "@/components/auction/BottomTabs";
 import PlayerListCard from "@/components/auction/PlayerListCard";
+import { ToastViewport, useToast } from "@/components/auction/Toast";
+import { formatINR } from "@/components/auction/format";
+import {
+  BoltIcon,
+  ChevronLeftIcon,
+  EyeIcon,
+  ListIcon,
+  SearchIcon,
+  StarIcon,
+  TrophyIcon,
+  UsersIcon,
+} from "@/components/auction/icons";
 
 interface TeamDetail {
   id: number;
@@ -48,6 +62,8 @@ interface CompletedSummary {
   stats: { total_players: number; sold_count: number; unsold_count: number };
 }
 
+type Tab = "live" | "team" | "players" | "teams";
+
 const getMinBidStep = (currentBid: number) => {
   if (currentBid >= 100000) return 10000;
   if (currentBid >= 10000) return 1000;
@@ -55,20 +71,25 @@ const getMinBidStep = (currentBid: number) => {
   return 50;
 };
 
+const BID_DEBOUNCE_MS = 2000;
+
+const STATUS_LABEL: Record<string, string> = { active: "Live", paused: "Paused", completed: "Finished" };
+
 export default function CaptainPage() {
   const router = useRouter();
   const { eventId } = useParams<{ eventId: string }>();
   const eid = parseInt(eventId);
   const store = useAuctionStore();
-  const user = useAuthStore((s) => s.user);
+  const authUser = useAuthStore((s) => s.user);
   const [hasAccess, setHasAccess] = useState(false);
   const [checkingAccess, setCheckingAccess] = useState(true);
+  // The auth store is only filled on login/dashboard, so a refresh here would lose it; use /auth/me instead
+  const [myId, setMyId] = useState<number | null>(null);
+  const myIdRef = useRef<number | null>(null);
   const [myTeam, setMyTeam] = useState<TeamDetail | null>(null);
   const [playerNames, setPlayerNames] = useState<Record<number, string>>({});
   const [playerPhotos, setPlayerPhotos] = useState<Record<number, string>>({});
   const [isLoadingPlayers, setIsLoadingPlayers] = useState(true);
-  const [bidAmount, setBidAmount] = useState("");
-  const [bidError, setBidError] = useState("");
   const [bidding, setBidding] = useState(false);
   const [lastBidTime, setLastBidTime] = useState(0);
   const [eventMeta, setEventMeta] = useState<EventMeta | null>(null);
@@ -76,9 +97,13 @@ export default function CaptainPage() {
   const [teamRosters, setTeamRosters] = useState<Record<number, { player_id: number; sold_price: number }[]>>({});
   const [bookmarked, setBookmarked] = useState<number[]>([]);
   const [playerFilter, setPlayerFilter] = useState<"all" | "pending" | "unsold">("pending");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<Tab>("live");
   const [socket, setSocket] = useState<AuctionSocket | null>(null);
   const [viewerCount, setViewerCount] = useState<number>(0);
+  const { toast, show: showToast, dismiss: dismissToast } = useToast();
 
+  const userId = myId ?? authUser?.id ?? null;
   const BOOKMARK_KEY = `captain_bookmarks_${eid}`;
 
   // Load bookmarks from localStorage on mount
@@ -107,12 +132,14 @@ export default function CaptainPage() {
         }
 
         const meRes = await api.get("/auth/me");
-        const me = meRes.data as { roles: string[] };
+        const me = meRes.data as { id: number; roles: string[] };
         const isCaptainRole = (me.roles || []).includes("captain");
         if (!isCaptainRole) {
           router.replace(`/auction/${eid}/spectate`);
           return;
         }
+        setMyId(me.id);
+        myIdRef.current = me.id;
 
         // Must be assigned as captain in this event.
         await api.get(`/auction/events/${eid}/my-team`);
@@ -161,8 +188,8 @@ export default function CaptainPage() {
     }
     // Set initial viewer count from API (especially important for completed events)
     if (viewerStatsRes.data) {
-      const count = stateRes.data.status === "completed" 
-        ? viewerStatsRes.data.total_unique_viewers 
+      const count = stateRes.data.status === "completed"
+        ? viewerStatsRes.data.total_unique_viewers
         : viewerStatsRes.data.live_viewers;
       setViewerCount(count || 0);
     }
@@ -201,13 +228,16 @@ export default function CaptainPage() {
     ws.on("*", (msg) => {
       if (msg.type === "timer_tick") store.setTimer(msg.remaining as number);
       if (msg.type === "new_bid") {
+        const me = myIdRef.current;
+        const prevBidder = useAuctionStore
+          .getState()
+          .players.find((p) => p.id === (msg.auction_player_id as number))?.current_bidder_id;
         store.updateBid(msg.auction_player_id as number, msg.amount as number, msg.captain_id as number);
-        setBidAmount((prev) => {
-          const currentBid = msg.amount as number;
-          const nextStep = getMinBidStep(currentBid);
-          const next = (parseInt(prev) || currentBid);
-          return next <= currentBid ? (currentBid + nextStep).toString() : prev;
-        });
+        if (me && prevBidder === me && msg.captain_id !== me) {
+          const rival = useAuctionStore.getState().teams.find((t) => t.captain_id === msg.captain_id)?.name ?? "Another team";
+          showToast(`Outbid! ${rival} bid ${formatINR(msg.amount as number)}`, "warning");
+          navigator.vibrate?.([80, 40, 80]);
+        }
       }
       if (msg.type === "player_sold") {
         store.markPlayerSold(msg.auction_player_id as number, msg.sold_to_captain_id as number, msg.sold_price as number);
@@ -218,9 +248,8 @@ export default function CaptainPage() {
       }
       if (msg.type === "player_up") {
         store.setActivePlayer(msg.auction_player_id as number, msg.base_price as number);
-        const basePrice = msg.base_price as number;
-        setBidAmount((basePrice + getMinBidStep(basePrice)).toString());
-        setBidError("");
+        // Bring captains back to the bidding view when a new player comes up
+        setTab("live");
       }
       if (msg.type === "auction_resumed") store.setFullState({ status: "active" });
       if (msg.type === "auction_paused") store.setFullState({ status: "paused" });
@@ -230,7 +259,7 @@ export default function CaptainPage() {
 
     setSocket(ws);
     return () => ws.disconnect();
-  }, [eid, hasAccess, store.status, syncState]);
+  }, [eid, hasAccess, store.status, syncState, showToast]);
 
   useEffect(() => {
     if (!hasAccess || store.status !== "completed") {
@@ -244,83 +273,31 @@ export default function CaptainPage() {
 
   const activeAP = store.players.find((p) => p.id === store.activePlayerId);
   const remaining = myTeam ? myTeam.budget - myTeam.spent : 0;
+  const slotsLeft = myTeam ? myTeam.max_players - myTeam.players.length : 0;
+  const myColor = store.teams.find((t) => t.captain_id === userId)?.color || "#f59e0b";
   const captainIds = new Set(
     store.teams
       .map((t) => t.captain_id)
       .filter((id): id is number => id !== null)
   );
   const pendingPlayers = store.players.filter(
-    (p) => p.status === "pending" && p.player_id !== user?.id && !captainIds.has(p.player_id)
+    (p) => p.status === "pending" && p.player_id !== userId && !captainIds.has(p.player_id)
   );
   const unsoldPlayers = store.players.filter(
-    (p) => p.status === "unsold" && p.player_id !== user?.id && !captainIds.has(p.player_id)
+    (p) => p.status === "unsold" && p.player_id !== userId && !captainIds.has(p.player_id)
   );
 
-  // All non-self players (pending + unsold), bookmarked floated to top
+  // Pending + unsold, filtered by tab and search, shortlisted floated to top
   const filteredPlayers = (() => {
     let base: typeof store.players = [];
-    if (playerFilter === "all") {
-      base = store.players.filter(
-        (p) =>
-          p.player_id !== user?.id &&
-          (p.status === "pending" || p.status === "unsold") &&
-          !captainIds.has(p.player_id)
-      );
-    }
+    if (playerFilter === "all") base = [...pendingPlayers, ...unsoldPlayers];
     else if (playerFilter === "pending") base = pendingPlayers;
     else base = unsoldPlayers;
-    // bookmarked first
-    const starred = base.filter(p => bookmarked.includes(p.id));
-    const rest = base.filter(p => !bookmarked.includes(p.id));
+    const q = search.trim().toLowerCase();
+    if (q) base = base.filter((p) => (playerNames[p.player_id] || "").toLowerCase().includes(q));
+    const starred = base.filter((p) => bookmarked.includes(p.id));
+    const rest = base.filter((p) => !bookmarked.includes(p.id));
     return [...starred, ...rest];
-  })();
-
-  const BID_DEBOUNCE_MS = 2000;
-
-  const placeBid = async () => {
-    if (!bidAmount) return;
-    
-    // Debounce: prevent rapid bids within 2 seconds
-    const now = Date.now();
-    if (now - lastBidTime < BID_DEBOUNCE_MS) {
-      return;
-    }
-    setLastBidTime(now);
-    
-    const numericAmount = parseInt(bidAmount, 10);
-    const validationError = getBidValidationError(numericAmount);
-    if (validationError) {
-      setBidError(validationError);
-      return;
-    }
-    setBidding(true);
-    setBidError("");
-    try {
-      await api.post(`/auction/events/${eid}/bid`, { amount: numericAmount });
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setBidError(msg || "Bid failed");
-    } finally {
-      setBidding(false);
-    }
-  };
-
-  const isMyBid = activeAP?.current_bidder_id === user?.id;
-  const effectiveBid = activeAP ? (activeAP.current_bid || activeAP.base_price) : 0;
-  // Max increment is min(50% of current bid, 5% of total budget)
-  const fiftyPercentIncrement = Math.floor(effectiveBid / 2);
-  const fivePercentOfBudget = myTeam ? Math.floor(myTeam.budget * 0.05) : fiftyPercentIncrement;
-  const maxIncrement = Math.min(fiftyPercentIncrement, fivePercentOfBudget);
-  const maxAllowedBid = effectiveBid + maxIncrement;
-  const minBidStep = getMinBidStep(effectiveBid);
-  const isResultState = activeAP?.status === "sold" || activeAP?.status === "unsold";
-  const iWonPlayer = !!activeAP && activeAP.status === "sold" && activeAP.current_bidder_id === user?.id;
-
-  const quickIncrements = (() => {
-    if (effectiveBid >= 100000) return [10000, 20000, 50000];
-    if (effectiveBid >= 10000) return [1000, 2000, 5000];
-    if (effectiveBid >= 1000) return [100, 200, 500];
-    return [50, 100, 200];
   })();
 
   const getTeamName = (captainId: number) => {
@@ -328,95 +305,135 @@ export default function CaptainPage() {
     return team ? team.name : playerNames[captainId] || `Captain #${captainId}`;
   };
 
-  const getBidValidationError = (amount: number) => {
-    if (Number.isNaN(amount)) return "Enter a valid bid amount";
-    const isFirstBid = !activeAP?.current_bidder_id;
-    const increment = amount - effectiveBid;
-    // First bid can be at base price (increment = 0), subsequent bids need minimum increment
-    if (isFirstBid) {
-      if (amount < effectiveBid) return `Bid must be at least base price: ${effectiveBid}`;
-    } else {
-      if (increment < minBidStep) return `Minimum increment for current bid is ${minBidStep}`;
+  // Bid limits mirror backend place_bid: step tiers, opening bid at base, max raise = min(50% of bid, 5% of budget)
+  const isMyBid = !!activeAP && activeAP.current_bidder_id === userId;
+  const effectiveBid = activeAP ? (activeAP.current_bid || activeAP.base_price) : 0;
+  const minBidStep = getMinBidStep(effectiveBid);
+  const isFirstBid = !activeAP?.current_bidder_id;
+  const minAmount = isFirstBid ? effectiveBid : effectiveBid + minBidStep;
+  const fiftyPercentIncrement = Math.floor(effectiveBid / 2);
+  const fivePercentOfBudget = myTeam ? Math.floor(myTeam.budget * 0.05) : fiftyPercentIncrement;
+  const maxIncrement = Math.min(fiftyPercentIncrement, fivePercentOfBudget);
+  const maxByRule = effectiveBid + Math.floor(maxIncrement / minBidStep) * minBidStep;
+  const maxByBudget = remaining >= effectiveBid ? effectiveBid + Math.floor((remaining - effectiveBid) / minBidStep) * minBidStep : -1;
+  const maxAmount = Math.min(maxByRule, maxByBudget);
+  const isResultState = activeAP?.status === "sold" || activeAP?.status === "unsold";
+  const iWonPlayer = !!activeAP && activeAP.status === "sold" && activeAP.current_bidder_id === userId;
+
+  const blockedReason =
+    store.status === "paused"
+      ? "Auction is paused. Bidding resumes when the auctioneer restarts."
+      : store.status !== "active"
+      ? "Bidding hasn't started yet."
+      : !myTeam
+      ? "Loading your team…"
+      : slotsLeft <= 0
+      ? "Your squad is full."
+      : activeAP && activeAP.player_id === userId
+      ? "You can't bid on yourself."
+      : maxAmount < minAmount
+      ? `Not enough budget. You have ${formatINR(remaining)} left.`
+      : undefined;
+
+  const placeBid = async (amount: number) => {
+    const now = Date.now();
+    if (now - lastBidTime < BID_DEBOUNCE_MS) {
+      showToast("Hold on, one bid every 2 seconds.", "info");
+      return;
     }
-    if (increment > 0 && increment % minBidStep !== 0) return `Bid increment must be in multiples of ${minBidStep}`;
-    if (amount > maxAllowedBid) {
-      const isCappedByBudget = fivePercentOfBudget < fiftyPercentIncrement;
-      const reason = isCappedByBudget ? "5% of budget" : "50% of current bid";
-      return `Max increment is ${reason}. Max allowed: ${maxAllowedBid.toLocaleString()}`;
+    setLastBidTime(now);
+    setBidding(true);
+    try {
+      await api.post(`/auction/events/${eid}/bid`, { amount });
+      showToast(`Bid placed: ${formatINR(amount)}`, "success");
+      navigator.vibrate?.(30);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      showToast(msg || "Bid failed. Please try again.", "error");
+    } finally {
+      setBidding(false);
     }
-    return "";
   };
-  const parsedBidAmount = parseInt(bidAmount, 10);
-  const inlineBidError = bidAmount ? getBidValidationError(parsedBidAmount) : "";
-  const bidDisabled = isMyBid || bidding || !activeAP || !!inlineBidError;
 
   if (checkingAccess) {
     return (
-      <div className="h-screen bg-gray-950 flex items-center justify-center text-gray-400">
-        Checking access...
+      <div className="min-h-dvh bg-gray-950 flex items-center justify-center gap-3 text-white/60">
+        <span aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+        Checking access…
       </div>
     );
   }
   if (!hasAccess) return null;
 
+  const tabs: TabItem<Tab>[] = [
+    { id: "live", label: "Live", icon: <BoltIcon className="w-5 h-5" /> },
+    { id: "team", label: "My team", icon: <UsersIcon className="w-5 h-5" /> },
+    { id: "players", label: "Players", icon: <ListIcon className="w-5 h-5" /> },
+    { id: "teams", label: "Teams", icon: <TrophyIcon className="w-5 h-5" /> },
+  ];
+  const budgetLeftPct = myTeam && myTeam.budget > 0 ? Math.max(0, (remaining / myTeam.budget) * 100) : 0;
+
   return (
-    <div className="h-screen bg-gray-950 flex flex-col">
+    <div className="min-h-dvh lg:h-dvh bg-gray-950 flex flex-col">
+      <ToastViewport toast={toast} onDismiss={dismissToast} />
+
       {/* Header */}
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-gray-950/85 backdrop-blur-xl">
+        <div className="flex items-center gap-3 px-3 sm:px-6 py-3">
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-gray-500 hover:text-white flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-800 transition-colors"
-            title="Exit to Dashboard"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+            aria-label="Back to dashboard"
           >
-            ←
+            <ChevronLeftIcon className="w-5 h-5" />
           </button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold">{myTeam ? myTeam.name : "Captain View"}</h1>
-              {store.status === "completed" && (
-                <span className="bg-green-500/20 text-green-400 text-xs font-semibold px-2 py-1 rounded">COMPLETED</span>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-display text-xl sm:text-2xl font-bold uppercase tracking-wide">
+              {myTeam ? myTeam.name : "Captain"}
+            </h1>
+            <p className="flex items-center gap-2 text-xs text-white/55">
+              <StatusDot status={store.status} />
+              {STATUS_LABEL[store.status] ?? "Not started"}
+              <span aria-hidden="true">·</span>
+              <EyeIcon className="w-3.5 h-3.5" />
+              <span className="tabular-nums">{viewerCount}</span>
+              <span className="sr-only">{store.status === "completed" ? "watched" : "watching"}</span>
+              {eventMeta?.scheduled_at && store.status !== "completed" && store.status !== "active" && (
+                <span className="hidden sm:inline">
+                  · {new Date(eventMeta.scheduled_at).toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
               )}
-            </div>
-            {eventMeta?.scheduled_at && store.status !== "completed" && (
-              <p className="text-xs text-gray-500 mt-0.5">
-                Auction:{" "}
-                {new Date(eventMeta.scheduled_at).toLocaleString("en-IN", {
-                  weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-                })}
-              </p>
-            )}
+            </p>
           </div>
+          {myTeam && (
+            <div className="flex items-center gap-4 sm:gap-6 text-right">
+              <div className="hidden sm:block">
+                <p className="font-display text-2xl font-bold tabular-nums leading-none">
+                  {myTeam.players.length}<span className="text-white/40">/{myTeam.max_players}</span>
+                </p>
+                <p className="mt-1 text-[10px] uppercase tracking-wider text-white/45">Squad</p>
+              </div>
+              <div>
+                <p className="font-display text-2xl sm:text-3xl font-bold tabular-nums leading-none text-amber-300">{formatINR(remaining)}</p>
+                <p className="mt-1 text-[10px] uppercase tracking-wider text-white/45">Budget left</p>
+              </div>
+            </div>
+          )}
         </div>
         {myTeam && (
-          <div className="flex gap-6 text-center">
-            <div>
-              <p className="text-xl font-bold text-blue-400">{viewerCount}</p>
-              <p className="text-xs text-gray-500">{store.status === "completed" ? "Watched" : "Watching"}</p>
-            </div>
-            <div>
-              <p className="text-xl font-bold text-amber-400">{remaining}</p>
-              <p className="text-xs text-gray-500">Budget Left</p>
-            </div>
-            <div>
-              <p className="text-xl font-bold">{myTeam.players.length}/{myTeam.max_players}</p>
-              <p className="text-xs text-gray-500">Players</p>
-            </div>
-            <div className="text-right">
-              <p className={`text-xs font-semibold uppercase ${store.status === "active" ? "text-green-400" : "text-gray-500"}`}>
-                {store.status === "active" ? "Live" : store.status}
-              </p>
-              <div className={`w-2 h-2 rounded-full ml-auto mt-1 ${store.status === "active" ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
-            </div>
+          <div className="h-0.5 w-full bg-white/5" aria-hidden="true">
+            <div className="h-full transition-[width] duration-700" style={{ width: `${budgetLeftPct}%`, background: myColor }} />
           </div>
         )}
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Main area */}
-        <div className="flex-1 p-6 overflow-scroll">
+      <div className="flex-1 flex flex-col lg:flex-row lg:overflow-hidden">
+        {/* Live bidding */}
+        <main
+          className={`${tab === "live" ? "block" : "hidden"} lg:block flex-1 lg:overflow-y-auto p-3 sm:p-6 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-6`}
+        >
           {activeAP ? (
-            <div className="max-w-2xl space-y-4">
+            <div className="mx-auto max-w-2xl space-y-3 sm:space-y-4">
               <AuctionPlayerCard
                 playerName={playerNames[activeAP.player_id] || `Player #${activeAP.player_id}`}
                 playerPhoto={playerPhotos[activeAP.player_id]}
@@ -431,69 +448,46 @@ export default function CaptainPage() {
                 timer={store.timer}
                 status={activeAP.status}
               />
-              {isMyBid && activeAP.status === "active" && (
-                <div className="bg-green-500/20 border border-green-500/30 rounded-xl p-4 text-center">
-                  <p className="text-green-400 font-semibold">You have the highest bid!</p>
-                </div>
-              )}
               {!isResultState ? (
-                <div className="card">
-                  <label className="label">Your Bid Amount</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      className="input"
-                      value={bidAmount}
-                      onChange={(e) => {
-                        setBidAmount(e.target.value);
-                        if (bidError) setBidError("");
-                      }}
-                      placeholder="Enter amount"
-                      min={effectiveBid + minBidStep}
-                      max={maxAllowedBid}
-                      step={minBidStep}
-                      disabled={isMyBid || bidding || !activeAP}
-                    />
-                    <button className="btn-primary whitespace-nowrap" onClick={placeBid} disabled={bidDisabled}>
-                      {bidding ? "..." : "Bid"}
-                    </button>
-                  </div>
-                  {(bidError || inlineBidError) && (
-                    <p className="text-red-400 text-sm mt-2">{bidError || inlineBidError}</p>
-                  )}
-                  <div className="flex gap-2 mt-3">
-                    {quickIncrements.map((inc) => (
-                      <button
-                        key={inc}
-                        className="btn-secondary text-xs px-2 py-1"
-                        onClick={() => setBidAmount((effectiveBid + inc).toString())}
-                        disabled={isMyBid || bidding || !activeAP || (effectiveBid + inc) > maxAllowedBid}
-                      >
-                        +{inc}
-                      </button>
-                    ))}
-                  </div>
+                <div className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] lg:bottom-4 z-20">
+                  <BidPanel
+                    resetKey={activeAP.id}
+                    minAmount={minAmount}
+                    maxAmount={maxAmount}
+                    step={minBidStep}
+                    budgetLeft={remaining}
+                    slotsLeft={slotsLeft}
+                    isLeading={isMyBid}
+                    leadingAmount={isMyBid ? activeAP.current_bid : undefined}
+                    blockedReason={blockedReason}
+                    busy={bidding}
+                    onBid={placeBid}
+                  />
                 </div>
               ) : (
-                <div className={`relative overflow-hidden rounded-xl border p-5 text-center ${
-                  activeAP.status === "sold"
-                    ? "bg-green-500/10 border-green-500/40"
-                    : "bg-red-500/10 border-red-500/40"
-                }`}>
-                  <p className={`text-lg font-bold ${iWonPlayer ? "text-green-300" : "text-amber-300"}`}>
-                    {iWonPlayer ? "You got the player!" : activeAP.status === "sold" ? "Player Sold" : "Player Unsold"}
+                <div
+                  className={`rounded-2xl border p-5 text-center animate-fade-up ${
+                    iWonPlayer
+                      ? "border-emerald-400/40 bg-emerald-500/10"
+                      : activeAP.status === "sold"
+                      ? "border-white/10 bg-white/[0.04]"
+                      : "border-red-500/30 bg-red-500/10"
+                  }`}
+                >
+                  <p className={`font-display text-2xl font-bold uppercase tracking-wide ${iWonPlayer ? "text-emerald-300" : "text-white"}`}>
+                    {iWonPlayer ? "You got the player!" : activeAP.status === "sold" ? "Player sold" : "Player unsold"}
                   </p>
-                  <p className="text-sm text-gray-300 mt-1">
+                  <p className="mt-1 text-sm text-white/70">
                     {activeAP.status === "sold"
-                      ? `Sold to ${getTeamName(activeAP.current_bidder_id as number)} for ₹${activeAP.current_bid}`
-                      : `${playerNames[activeAP.player_id] || `Player #${activeAP.player_id}`} remains UNSOLD.`}
+                      ? `Sold to ${getTeamName(activeAP.current_bidder_id as number)} for ${formatINR(activeAP.current_bid)}`
+                      : `${playerNames[activeAP.player_id] || `Player #${activeAP.player_id}`} goes back to the pool.`}
                   </p>
-                  <p className="text-xs text-gray-500 mt-2">Waiting for auctioneer to move next player...</p>
+                  <p className="mt-3 text-xs uppercase tracking-[0.2em] text-white/40">Waiting for the next player…</p>
                 </div>
               )}
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center max-w-lg mx-auto text-center">
+            <div className="mx-auto flex max-w-lg flex-col items-center justify-center text-center">
               {store.status === "completed" ? (
                 <div className="w-full max-w-3xl text-left">
                   <div className="text-center mb-6">
@@ -502,61 +496,50 @@ export default function CaptainPage() {
                         <img src={eventMeta.logo} alt="" className="w-full h-full object-cover" />
                       </div>
                     ) : (
-                      <div className="text-7xl mb-4">🏆</div>
+                      <TrophyIcon className="mx-auto mb-4 h-16 w-16 text-amber-400" />
                     )}
-                    <h2 className="text-4xl font-bold text-white">Auction Completed</h2>
-                    <p className="text-gray-400 mt-2">Final summary for captains</p>
+                    <h2 className="font-display text-4xl font-bold uppercase tracking-wide text-white">Auction completed</h2>
+                    <p className="text-white/55 mt-2">Final summary for captains</p>
                   </div>
                   {completedSummary ? (
                     <div className="space-y-4">
                       <div className="grid grid-cols-3 gap-3">
-                        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-                          <p className="text-xs text-gray-500 uppercase">Total</p>
-                          <p className="text-2xl font-bold text-white">{completedSummary.stats.total_players}</p>
-                        </div>
-                        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-                          <p className="text-xs text-gray-500 uppercase">Sold</p>
-                          <p className="text-2xl font-bold text-green-400">{completedSummary.stats.sold_count}</p>
-                        </div>
-                        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-                          <p className="text-xs text-gray-500 uppercase">Unsold</p>
-                          <p className="text-2xl font-bold text-red-400">{completedSummary.stats.unsold_count}</p>
-                        </div>
+                        <SummaryStat label="Total" value={completedSummary.stats.total_players} />
+                        <SummaryStat label="Sold" value={completedSummary.stats.sold_count} tone="text-emerald-300" />
+                        <SummaryStat label="Unsold" value={completedSummary.stats.unsold_count} tone="text-red-300" />
                       </div>
 
                       {completedSummary.highest_bid_player && (
-                        <div className="bg-gray-900 border border-amber-500/30 rounded-xl p-4">
-                          <p className="text-xs text-gray-500 uppercase mb-1">Highest Bid Player</p>
+                        <div className="rounded-2xl border border-amber-400/30 bg-white/[0.03] p-4">
+                          <p className="text-xs uppercase tracking-wider text-white/50 mb-1">Highest bid</p>
                           <p className="text-lg font-bold text-white">{completedSummary.highest_bid_player.player_name}</p>
                           <p className="text-sm text-amber-300">
-                            ₹{completedSummary.highest_bid_player.sold_price} · {completedSummary.highest_bid_player.team_name}
+                            {formatINR(completedSummary.highest_bid_player.sold_price)} · {completedSummary.highest_bid_player.team_name}
                           </p>
                         </div>
                       )}
 
                       {completedSummary.strongest_team && (
-                        <div className="bg-gray-900 border border-blue-500/30 rounded-xl p-4">
-                          <p className="text-xs text-gray-500 uppercase mb-1">Most Powerful Team (Ratings)</p>
+                        <div className="rounded-2xl border border-blue-400/30 bg-white/[0.03] p-4">
+                          <p className="text-xs uppercase tracking-wider text-white/50 mb-1">Most powerful team (ratings)</p>
                           <p className="text-lg font-bold text-white">{completedSummary.strongest_team.team_name}</p>
-                          <p className="text-sm text-blue-300">
-                            Overall Avg: {completedSummary.strongest_team.overall_rating}
-                          </p>
-                          <p className="text-xs text-gray-400 mt-1">
+                          <p className="text-sm text-blue-300">Overall avg: {completedSummary.strongest_team.overall_rating}</p>
+                          <p className="text-xs text-white/55 mt-1">
                             Bat {completedSummary.strongest_team.batting_avg} · Bowl {completedSummary.strongest_team.bowling_avg} · Field {completedSummary.strongest_team.fielding_avg}
                           </p>
                         </div>
                       )}
 
-                      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                        <p className="text-xs text-gray-500 uppercase mb-2">Unsold Players</p>
-                        <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar pr-1">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                        <p className="text-xs uppercase tracking-wider text-white/50 mb-2">Unsold players</p>
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
                           {completedSummary.unsold_players.length === 0 ? (
-                            <p className="text-xs text-gray-500">No unsold players</p>
+                            <p className="text-sm text-white/45">No unsold players</p>
                           ) : (
                             completedSummary.unsold_players.map((p) => (
-                              <div key={p.player_id} className="flex items-center justify-between text-xs bg-gray-800 rounded px-2 py-1">
-                                <span className="text-gray-300 truncate">{p.name}</span>
-                                <span className="text-red-300">Base ₹{p.base_price}</span>
+                              <div key={p.player_id} className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2 text-sm">
+                                <span className="truncate text-white/80">{p.name}</span>
+                                <span className="text-red-300 tabular-nums">Base {formatINR(p.base_price)}</span>
                               </div>
                             ))
                           )}
@@ -564,25 +547,44 @@ export default function CaptainPage() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-center">Loading summary...</p>
+                    <p className="text-white/50 text-center">Loading summary…</p>
                   )}
                 </div>
               ) : (
-                <>
-                  <div className="text-8xl mb-6">🏟️</div>
-                  <h2 className="text-3xl font-bold text-white mb-3">
+                <div className="py-10 sm:py-16">
+                  <div className="relative mx-auto mb-6 flex h-20 w-20 items-center justify-center">
+                    {store.status === "active" && <span aria-hidden="true" className="absolute inset-0 rounded-full bg-amber-400/20 animate-ping" />}
+                    <span className="relative flex h-20 w-20 items-center justify-center rounded-full border border-white/10 bg-white/5 text-amber-300">
+                      <BoltIcon className="w-9 h-9" />
+                    </span>
+                  </div>
+                  <h2 className="font-display text-3xl font-bold uppercase tracking-wide text-white">
                     {store.status === "active"
-                      ? "Waiting for next player..."
+                      ? "Next player coming up"
                       : store.status === "paused"
                       ? "Auction is paused"
                       : "Auction not started yet"}
                   </h2>
-                </>
+                  <p className="mt-2 text-sm text-white/55">
+                    {store.status === "active"
+                      ? "Stay here. Bidding opens as soon as the auctioneer brings up a player."
+                      : "Meanwhile, shortlist the players you want in the Players tab."}
+                  </p>
+                  {store.status !== "active" && (
+                    <button
+                      type="button"
+                      onClick={() => setTab("players")}
+                      className="lg:hidden mt-5 inline-flex h-11 items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white hover:bg-white/10"
+                    >
+                      <StarIcon className="w-4 h-4" /> Build your shortlist
+                    </button>
+                  )}
+                </div>
               )}
               {store.status !== "completed" && store.status !== "active" && eventMeta?.scheduled_at && (
-                <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mt-8 w-full">
-                  <p className="text-sm text-gray-400 uppercase tracking-widest font-semibold mb-2">Event Schedule</p>
-                  <p className="text-xl font-medium text-amber-400">
+                <div className="w-full rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+                  <p className="text-xs text-white/50 uppercase tracking-widest font-semibold mb-2">Event schedule</p>
+                  <p className="text-lg font-medium text-amber-300">
                     {new Date(eventMeta.scheduled_at).toLocaleString("en-IN", {
                       weekday: "long",
                       day: "numeric",
@@ -590,7 +592,7 @@ export default function CaptainPage() {
                       year: "numeric",
                     })}
                   </p>
-                  <p className="text-3xl font-bold text-white mt-1">
+                  <p className="font-display text-4xl font-bold text-white mt-1">
                     {new Date(eventMeta.scheduled_at).toLocaleString("en-IN", {
                       hour: "2-digit",
                       minute: "2-digit",
@@ -600,22 +602,27 @@ export default function CaptainPage() {
               )}
             </div>
           )}
-        </div>
+        </main>
 
-        {/* Side panel */}
-        <aside className="w-80 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
-          {/* My Team Roster */}
-          <div className="p-4 border-b border-gray-800">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase mb-3">
-              My Team Roster {myTeam && <span className="text-gray-600">({myTeam.players.length}/{myTeam.max_players})</span>}
-            </h3>
+        {/* Side panel: separate tabs on phones, one scrolling column from lg */}
+        <aside
+          className={`${tab === "live" ? "hidden" : "flex"} lg:flex w-full lg:w-[400px] shrink-0 flex-col gap-8 lg:border-l border-white/10 lg:bg-gray-900/40 lg:overflow-y-auto p-3 sm:p-6 lg:p-5 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:pb-5`}
+        >
+          {/* My team */}
+          <section className={`${tab === "team" ? "" : "hidden"} lg:block`} aria-labelledby="my-team-heading">
+            <SectionHeading id="my-team-heading" title="My squad" meta={myTeam ? `${myTeam.players.length}/${myTeam.max_players}` : undefined} />
+            {myTeam && (
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <MiniStat label="Spent" value={formatINR(myTeam.spent)} />
+                <MiniStat label="Left" value={formatINR(remaining)} tone="text-amber-300" />
+              </div>
+            )}
             {myTeam && myTeam.players.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {myTeam.players.map((tp, i) => (
                   <PlayerListCard
                     key={tp.id}
                     index={i}
-                    size="sm"
                     name={playerNames[tp.player_id] || `Player #${tp.player_id}`}
                     photo={playerPhotos[tp.player_id]}
                     status="sold"
@@ -625,123 +632,143 @@ export default function CaptainPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-600 text-center py-3">No players yet. Start bidding!</p>
+              <EmptyNote>No players yet. Win a bid to add one.</EmptyNote>
             )}
-          </div>
+          </section>
 
-          {/* Other Teams (expandable) */}
-          <div className="p-4 border-b border-gray-800">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase mb-3">Other Teams</h3>
-            <div className="space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
-              {store.teams
-                .filter((t) => t.captain_id !== user?.id)
-                .map((t) => {
-                  const roster = teamRosters[t.id] || [];
-                  const left = t.budget - t.spent;
-                  return (
-                    <details key={t.id} className="bg-gray-800 rounded-lg overflow-hidden group">
-                      <summary className="list-none cursor-pointer px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm font-medium truncate">{t.name}</p>
-                          <span className="text-[10px] text-gray-500">{t.player_count}/{t.max_players}</span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-[10px]">
-                          <span className="text-gray-500">Spent: {t.spent}</span>
-                          <span className={left < 200 ? "text-red-400" : "text-green-400"}>Left: {left}</span>
-                        </div>
-                      </summary>
-                      <div className="px-2 pb-2">
-                        {roster.length > 0 ? (
-                          <div className="space-y-1">
-                            {roster.map((rp, idx) => (
-                              <div key={`${t.id}-${rp.player_id}-${idx}`} className="flex items-center justify-between bg-gray-900 rounded px-2 py-1">
-                                <span className="text-[11px] text-gray-300 truncate">
-                                  {playerNames[rp.player_id] || `Player #${rp.player_id}`}
-                                </span>
-                                <span className="text-[11px] text-amber-400">₹{rp.sold_price}</span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="text-[11px] text-gray-600 italic px-1 pb-1">No players yet</p>
-                        )}
-                      </div>
-                    </details>
-                  );
-                })}
-            </div>
-          </div>
-
-          {/* Players list */}
-          <div className="flex-1 flex flex-col overflow-hidden p-4">
-            {/* Filter tabs */}
-            <div className="flex gap-1 mb-3 bg-gray-800 rounded-lg p-1">
+          {/* Players to bid on */}
+          <section className={`${tab === "players" ? "" : "hidden"} lg:block`} aria-labelledby="players-heading">
+            <SectionHeading id="players-heading" title="Players" meta={`${pendingPlayers.length} left`} />
+            <label className="relative mb-3 block">
+              <span className="sr-only">Search players</span>
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name"
+                className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] pl-9 pr-3 text-base sm:text-sm text-white placeholder-white/35 focus:border-amber-400/60 focus:outline-none focus:ring-2 focus:ring-amber-400/20"
+              />
+            </label>
+            <div role="group" aria-label="Filter players" className="mb-3 grid grid-cols-3 gap-1 rounded-xl bg-white/[0.04] p-1">
               {([
-                ["pending", `Remaining (${pendingPlayers.length})`],
-                ["unsold", `Unsold (${unsoldPlayers.length})`],
-                ["all", `All (${pendingPlayers.length + unsoldPlayers.length})`],
-              ] as [typeof playerFilter, string][]).map(([val, label]) => (
+                ["pending", "Remaining", pendingPlayers.length],
+                ["unsold", "Unsold", unsoldPlayers.length],
+                ["all", "All", pendingPlayers.length + unsoldPlayers.length],
+              ] as [typeof playerFilter, string, number][]).map(([val, label, count]) => (
                 <button
                   key={val}
-                  className={`flex-1 text-[10px] font-semibold py-1.5 rounded-md transition-colors ${
-                    playerFilter === val ? "bg-gray-700 text-white" : "text-gray-500 hover:text-gray-300"
+                  type="button"
+                  aria-pressed={playerFilter === val}
+                  className={`h-9 rounded-lg text-xs font-semibold transition-colors ${
+                    playerFilter === val ? "bg-white/10 text-white" : "text-white/50 hover:text-white/80"
                   }`}
                   onClick={() => setPlayerFilter(val)}
                 >
-                  {label}
+                  {label} <span className="tabular-nums text-white/40">{count}</span>
                 </button>
               ))}
             </div>
+            <p className="mb-2 flex items-center gap-1.5 px-1 text-[11px] text-white/45">
+              <StarIcon className="w-3.5 h-3.5 text-amber-400" filled /> Star players to shortlist them. Shortlisted players stay on top.
+            </p>
 
-            {bookmarked.length > 0 && filteredPlayers.some(p => bookmarked.includes(p.id)) && (
-              <p className="text-[10px] text-amber-500/70 uppercase font-semibold mb-1.5 px-1">★ Bookmarked first</p>
-            )}
-
-            <div className="space-y-1.5 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+            <div className="space-y-2">
               {isLoadingPlayers ? (
-                <div className="flex flex-col items-center justify-center py-10 space-y-3">
-                  <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-xs text-gray-500">Loading players...</p>
+                <div className="flex items-center justify-center gap-3 py-10 text-sm text-white/50">
+                  <span aria-hidden="true" className="h-5 w-5 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+                  Loading players…
                 </div>
               ) : filteredPlayers.length === 0 ? (
-                <p className="text-xs text-gray-600 text-center py-6">No players in this category.</p>
+                <EmptyNote>{search ? "No players match your search." : "No players in this category."}</EmptyNote>
               ) : (
-                filteredPlayers.map((p) => {
+                filteredPlayers.map((p, i) => {
                   const isBookmarked = bookmarked.includes(p.id);
+                  const name = playerNames[p.player_id] || `Player #${p.player_id}`;
                   return (
-                    <button
+                    <PlayerListCard
                       key={p.id}
-                      className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left transition-colors ${
-                        isBookmarked
-                          ? "bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/15"
-                          : "bg-gray-800 border border-transparent hover:bg-gray-750"
-                      }`}
-                      onClick={() => toggleBookmark(p.id)}
-                    >
-                      <PlayerAvatar
-                        name={playerNames[p.player_id] || `Player #${p.player_id}`}
-                        photo={playerPhotos[p.player_id]}
-                        size="sm"
-                        tone={p.status === "unsold" ? "unsold" : "none"}
-                      />
-                      <span className={`text-xs flex-1 truncate ${p.status === "unsold" ? "text-gray-500" : "text-gray-200"}`}>
-                        {playerNames[p.player_id] || `Player #${p.player_id}`}
-                      </span>
-                      <span className="flex items-center gap-1 shrink-0">
-                        {p.status === "unsold" && (
-                          <span className="text-red-400 text-[9px] font-semibold px-1.5 py-0.5 bg-red-500/10 rounded">UNSOLD</span>
-                        )}
-                        <span className={`text-sm ${isBookmarked ? "text-amber-400" : "text-gray-600 hover:text-gray-400"}`}>★</span>
-                      </span>
-                    </button>
+                      index={i}
+                      name={name}
+                      photo={playerPhotos[p.player_id]}
+                      status={p.status}
+                      showStatus={p.status === "unsold"}
+                      subtitle={isBookmarked ? "Shortlisted" : `Base ${formatINR(p.base_price)}`}
+                      action={
+                        <button
+                          type="button"
+                          aria-pressed={isBookmarked}
+                          aria-label={isBookmarked ? `Remove ${name} from shortlist` : `Shortlist ${name}`}
+                          onClick={() => toggleBookmark(p.id)}
+                          className="flex h-10 w-10 items-center justify-center rounded-lg transition hover:bg-white/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                        >
+                          <StarIcon filled={isBookmarked} className={`w-5 h-5 ${isBookmarked ? "text-amber-400" : "text-white/35"}`} />
+                        </button>
+                      }
+                    />
                   );
                 })
               )}
             </div>
-          </div>
+          </section>
+
+          {/* All teams */}
+          <section className={`${tab === "teams" ? "" : "hidden"} lg:block`} aria-labelledby="teams-heading">
+            <SectionHeading id="teams-heading" title="Teams" />
+            <TeamSummary
+              teams={store.teams}
+              highlightCaptainId={userId}
+              teamRosters={teamRosters}
+              playerNames={playerNames}
+              playerPhotos={playerPhotos}
+              singleColumn
+            />
+          </section>
         </aside>
       </div>
+
+      <BottomTabs tabs={tabs} active={tab} onChange={setTab} />
     </div>
   );
 }
 
+function StatusDot({ status }: { status: string }) {
+  const color = status === "active" ? "bg-emerald-400" : status === "paused" ? "bg-amber-400" : status === "completed" ? "bg-blue-400" : "bg-white/30";
+  return (
+    <span className="relative flex h-2 w-2" aria-hidden="true">
+      {status === "active" && <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping" />}
+      <span className={`relative h-2 w-2 rounded-full ${color}`} />
+    </span>
+  );
+}
+
+function SectionHeading({ id, title, meta }: { id: string; title: string; meta?: string }) {
+  return (
+    <div className="mb-3 flex items-baseline justify-between px-1">
+      <h2 id={id} className="font-display text-xl font-bold uppercase tracking-wide text-white">{title}</h2>
+      {meta && <span className="text-xs font-semibold text-white/45 tabular-nums">{meta}</span>}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, tone = "text-white" }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5">
+      <p className="text-[10px] uppercase tracking-wider text-white/45">{label}</p>
+      <p className={`font-display text-xl font-bold tabular-nums ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, tone = "text-white" }: { label: string; value: number; tone?: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-center">
+      <p className="text-xs uppercase tracking-wider text-white/50">{label}</p>
+      <p className={`font-display text-3xl font-bold tabular-nums ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
+function EmptyNote({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-white/45">{children}</p>;
+}

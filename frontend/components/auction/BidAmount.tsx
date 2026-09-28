@@ -5,7 +5,7 @@ import { formatINR } from "./format";
 import { useAnimatedNumber } from "./useAnimatedNumber";
 
 const SIZES = {
-  lg: { amount: "text-6xl sm:text-7xl", delta: "text-2xl" },
+  lg: { amount: "text-5xl sm:text-7xl", delta: "text-xl sm:text-2xl" },
   xl: { amount: "text-7xl sm:text-8xl", delta: "text-3xl" },
 };
 

@@ -14,7 +14,7 @@ const STAGE: Record<Stage, { stroke: string; text: string; glow: string; label: 
 };
 
 const SIZES = {
-  md: { box: "w-28 h-28", stroke: 7, time: "text-4xl", label: "text-[10px]", ticks: 0 },
+  md: { box: "w-24 h-24 sm:w-28 sm:h-28", stroke: 7, time: "text-3xl sm:text-4xl", label: "text-[9px] sm:text-[10px]", ticks: 0 },
   xl: { box: "w-64 h-64 sm:w-72 sm:h-72", stroke: 5, time: "text-8xl", label: "text-sm", ticks: 60 },
 };
 

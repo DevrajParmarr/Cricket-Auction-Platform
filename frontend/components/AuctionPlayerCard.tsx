@@ -70,27 +70,27 @@ export default function AuctionPlayerCard({
           style={{ backgroundImage: "repeating-linear-gradient(100deg, #fff 0 34px, transparent 34px 68px)" }}
         />
 
-        <div key={playerName} className="relative p-5 sm:p-7 animate-card-in">
-          <div className="flex items-center justify-between gap-3 mb-6">
+        <div key={playerName} className="relative p-4 sm:p-7 animate-card-in">
+          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-6">
             <StatusBadge live={isLive} sold={isSold} unsold={isUnsold} />
             <p className="text-[11px] uppercase tracking-[0.2em] text-white/50">
               Base <span className="font-display text-lg tracking-normal text-white/85 ml-1">{formatINR(basePrice)}</span>
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-6">
+          <div className="flex items-center gap-3 sm:gap-6">
             <PlayerAvatar
               name={playerName}
               photo={playerPhoto}
-              size="xl"
+              size="hero"
               tone={isLive ? "live" : isSold ? "sold" : isUnsold ? "unsold" : "none"}
             />
-            <div className="flex-1 min-w-0 text-center sm:text-left">
-              <p className="text-[11px] uppercase tracking-[0.3em] font-semibold mb-1.5" style={{ color: accent }}>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.25em] sm:tracking-[0.3em] font-semibold mb-1 sm:mb-1.5" style={{ color: accent }}>
                 {isLive ? "Now bidding" : isSold ? "Hammer down" : isUnsold ? "No takers" : "Up next"}
               </p>
               <h2
-                className="font-display font-extrabold uppercase leading-[0.92] tracking-wide text-4xl sm:text-5xl text-white [overflow-wrap:anywhere]"
+                className="font-display font-extrabold uppercase leading-[0.92] tracking-wide text-3xl sm:text-5xl text-white [overflow-wrap:anywhere]"
                 style={{ textWrap: "balance" } as React.CSSProperties}
               >
                 {playerName}
@@ -104,7 +104,7 @@ export default function AuctionPlayerCard({
             )}
           </div>
 
-          <div className="relative mt-7 rounded-2xl border border-white/10 bg-white/[0.035] px-5 py-5">
+          <div className="relative mt-4 sm:mt-7 rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-4 sm:px-5 sm:py-5">
             {/* Light sweep on every accepted bid */}
             <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-2xl">
               <span
@@ -113,15 +113,15 @@ export default function AuctionPlayerCard({
               />
             </div>
 
-            <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-              <div className="text-center sm:text-left">
-                <p className="text-[11px] uppercase tracking-[0.25em] text-white/50 mb-2.5">
+            <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 sm:gap-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.25em] text-white/50 mb-2 sm:mb-2.5">
                   {isSold ? "Sold for" : hasBid ? "Current bid" : "Opening bid"}
                 </p>
                 <BidAmount amount={displayBid} resetKey={playerName} pulseKey={pulseKey} />
               </div>
 
-              <div className="flex justify-center sm:justify-end">
+              <div className="flex sm:justify-end">
                 {hasBid ? (
                   <div
                     key={currentBidderName}

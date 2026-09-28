@@ -743,6 +743,7 @@ export default function SpectatePage() {
               ) : (
                   allPlayersFiltered.map((p, i) => {
                     const teamName = getTeamNameForPlayer(p.player_id);
+                    const isCaptain = captainIds.has(p.player_id);
                     return (
                       <PlayerListCard
                         key={p.id}
@@ -751,8 +752,9 @@ export default function SpectatePage() {
                         name={playerNames[p.player_id] || `#${p.player_id}`}
                         photo={playerPhotos[p.player_id]}
                         status={p.status}
-                        price={p.status === "sold" ? p.current_bid : undefined}
-                        subtitle={teamName ?? undefined}
+                        price={p.status === "sold" && !isCaptain ? p.current_bid : undefined}
+                        showStatus={!isCaptain}
+                        subtitle={isCaptain ? `Captain${teamName ? ` · ${teamName}` : ""}` : teamName ?? undefined}
                       />
                     );
                   })

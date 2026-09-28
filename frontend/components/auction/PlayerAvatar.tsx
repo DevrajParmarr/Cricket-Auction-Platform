@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type Size = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
+type Size = "xs" | "sm" | "md" | "lg" | "hero" | "xl" | "2xl";
 type Tone = "none" | "live" | "sold" | "unsold";
 
 const SIZES: Record<Size, { box: string; text: string; px: number }> = {
@@ -10,6 +10,7 @@ const SIZES: Record<Size, { box: string; text: string; px: number }> = {
   sm: { box: "w-8 h-8", text: "text-xs", px: 32 },
   md: { box: "w-10 h-10", text: "text-sm", px: 40 },
   lg: { box: "w-16 h-16", text: "text-xl", px: 64 },
+  hero: { box: "w-16 h-16 sm:w-24 sm:h-24", text: "text-xl sm:text-3xl", px: 96 },
   xl: { box: "w-24 h-24", text: "text-3xl", px: 96 },
   "2xl": { box: "w-32 h-32", text: "text-5xl", px: 128 },
 };

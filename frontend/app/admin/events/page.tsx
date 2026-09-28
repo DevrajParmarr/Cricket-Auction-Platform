@@ -57,8 +57,10 @@ export default function AdminEventsPage() {
     try {
       const { data } = await api.get("/admin/events");
       setEvents(data);
-    } catch {
-      router.push("/auth/login");
+    } catch (err: unknown) {
+      // Only a missing/expired session means "log in"; lacking the admin role goes back to the dashboard
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      router.push(status === 401 ? "/auth/login" : "/dashboard");
     } finally {
       setLoading(false);
     }

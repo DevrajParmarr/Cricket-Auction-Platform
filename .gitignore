@@ -221,3 +221,6 @@ yarn-error.log*
 
 # Local Netlify folder
 .netlify
+
+# TypeScript incremental build cache
+*.tsbuildinfo

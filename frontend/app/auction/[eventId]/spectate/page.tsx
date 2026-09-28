@@ -7,6 +7,13 @@ import api from "@/lib/api";
 import { useAuctionStore } from "@/store/auction";
 import { AuctionSocket } from "@/lib/ws";
 import brandLogo from "@/asset/Logo Png (3).png";
+import AuctionTimer from "@/components/auction/AuctionTimer";
+import BidAmount from "@/components/auction/BidAmount";
+import Confetti from "@/components/auction/Confetti";
+import PlayerAvatar from "@/components/auction/PlayerAvatar";
+import PlayerListCard from "@/components/auction/PlayerListCard";
+import ResultStamp from "@/components/auction/ResultStamp";
+import { formatINR } from "@/components/auction/format";
 
 interface CompletedSummary {
   highest_bid_player: { player_name: string; sold_price: number; team_name: string } | null;
@@ -190,7 +197,6 @@ export default function SpectatePage() {
       ? store.players.find((p) => p.id === lastShownAuctionPlayerId)
       : undefined);
   const timer = store.timer;
-  const timerColor = timer > 30 ? "text-green-400" : timer > 10 ? "text-amber-400" : "text-red-400 animate-pulse";
   const captainIds = new Set(
     store.teams
       .map((t) => t.captain_id)
@@ -359,68 +365,106 @@ export default function SpectatePage() {
         <div className="flex-1 flex flex-col items-center p-10 overflow-y-auto">
           {displayAP ? (
             <div className="text-center max-w-2xl w-full">
-              {/* Timer */}
-              <div className={`text-9xl font-mono font-black mb-6 ${timerColor}`}>
-                {timer.toString().padStart(2, "0")}
-              </div>
-
-              {/* Player avatar + name */}
-              <div className="flex flex-col items-center mb-6">
-                <div className="w-24 h-24 rounded-full bg-gray-800 overflow-hidden mb-3 flex items-center justify-center text-3xl border-2 border-gray-700">
-                  {playerPhotos[displayAP.player_id] ? (
-                    <img
-                      src={playerPhotos[displayAP.player_id] as string}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span>👤</span>
-                  )}
+              {displayAP.status === "active" && (
+                <div className="flex justify-center mb-8">
+                  <AuctionTimer seconds={timer} size="xl" />
                 </div>
-                <h2 className="text-5xl font-extrabold mb-1">
+              )}
+
+              {/* Player */}
+              <div key={displayAP.id} className="flex flex-col items-center mb-8 animate-card-in">
+                <PlayerAvatar
+                  name={playerNames[displayAP.player_id] || `Player #${displayAP.player_id}`}
+                  photo={playerPhotos[displayAP.player_id]}
+                  size="2xl"
+                  tone={displayAP.status === "active" ? "live" : displayAP.status === "sold" ? "sold" : displayAP.status === "unsold" ? "unsold" : "none"}
+                />
+                <p className="mt-6 text-xs uppercase tracking-[0.35em] font-semibold text-amber-400/80">
+                  {displayAP.status === "active" ? "Now bidding" : displayAP.status === "sold" ? "Hammer down" : displayAP.status === "unsold" ? "No takers" : "Up next"}
+                </p>
+                <h2
+                  className="mt-1 font-display font-extrabold uppercase tracking-wide leading-[0.9] text-6xl sm:text-7xl [overflow-wrap:anywhere]"
+                  style={{ textWrap: "balance" } as React.CSSProperties}
+                >
                   {playerNames[displayAP.player_id] || `Player #${displayAP.player_id}`}
                 </h2>
-                <p className="text-gray-500 font-medium">Base Price: ₹{displayAP.base_price}</p>
+                <p className="mt-3 text-sm uppercase tracking-[0.2em] text-white/50">
+                  Base <span className="ml-1 font-display text-xl tracking-normal text-white/80">{formatINR(displayAP.base_price)}</span>
+                </p>
               </div>
 
               {displayAP.status === "sold" || displayAP.status === "unsold" ? (
-                <div className={`relative overflow-hidden rounded-2xl border-2 p-8 mb-6 text-center shadow-[0_0_40px_-10px_rgba(251,191,36,0.15)] ${
-                  displayAP.status === "sold"
-                    ? "bg-green-500/10 border-green-500/40"
-                    : "bg-red-500/10 border-red-500/40"
-                }`}>
-                  {displayAP.status === "sold" && (
-                    <div className="absolute inset-0 pointer-events-none">
-                      <div className="absolute -top-2 left-6 text-2xl animate-bounce">🎉</div>
-                      <div className="absolute -top-2 right-8 text-2xl animate-bounce [animation-delay:120ms]">✨</div>
-                    </div>
-                  )}
-                  {displayAP.status === "unsold" && (
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div className="text-red-400/20 text-[120px] font-black leading-none select-none animate-pulse">✕</div>
-                    </div>
-                  )}
-                  <p className="text-gray-400 text-sm uppercase tracking-widest mb-2 font-semibold">Result</p>
-                  <p className={`text-5xl font-extrabold ${displayAP.status === "sold" ? "text-green-300" : "text-red-300"}`}>
-                    {displayAP.status === "sold" ? "SOLD!" : "UNSOLD"}
-                  </p>
-                  <p className="text-sm text-gray-300 mt-3">
-                    {displayAP.status === "sold"
-                      ? `${playerNames[displayAP.player_id] || `Player #${displayAP.player_id}`} sold to ${getTeamName(displayAP.current_bidder_id as number)} for ₹${displayAP.current_bid}`
-                      : `${playerNames[displayAP.player_id] || `Player #${displayAP.player_id}`} remains UNSOLD.`}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2">Waiting for auctioneer to move next player...</p>
+                <div
+                  key={`${displayAP.id}-${displayAP.status}`}
+                  className={`relative overflow-hidden rounded-3xl border p-10 mb-6 text-center animate-card-in ${
+                    displayAP.status === "sold"
+                      ? "bg-gradient-to-b from-emerald-500/15 to-emerald-500/[0.03] border-emerald-400/40 shadow-[0_0_80px_-20px_rgba(52,211,153,0.45)]"
+                      : "bg-gradient-to-b from-red-500/10 to-transparent border-red-500/30"
+                  }`}
+                >
+                  {displayAP.status === "sold" && <Confetti />}
+                  <div className="relative">
+                    <ResultStamp result={displayAP.status} size="xl" />
+                    {displayAP.status === "sold" ? (
+                      <>
+                        <p className="mt-8 font-display font-extrabold tabular-nums text-6xl text-emerald-200">
+                          {formatINR(displayAP.current_bid)}
+                        </p>
+                        <p className="mt-3 text-lg text-white/80">
+                          to{" "}
+                          <span className="inline-flex items-center gap-2 font-semibold text-white">
+                            <span
+                              aria-hidden="true"
+                              className="w-3 h-3 rounded-full"
+                              style={{ background: store.teams.find((t) => t.captain_id === displayAP.current_bidder_id)?.color || "#34d399" }}
+                            />
+                            {getTeamName(displayAP.current_bidder_id as number)}
+                          </span>
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-8 text-lg text-white/70">
+                        {playerNames[displayAP.player_id] || `Player #${displayAP.player_id}`} goes back to the pool.
+                      </p>
+                    )}
+                    <p className="text-xs uppercase tracking-[0.2em] text-white/40 mt-5">Waiting for the auctioneer…</p>
+                  </div>
                 </div>
               ) : (
-                <div className="bg-gray-900 border-2 border-amber-500/40 rounded-2xl p-8 mb-6 shadow-[0_0_40px_-10px_rgba(251,191,36,0.15)]">
-                  <p className="text-gray-400 text-sm uppercase tracking-widest mb-2 font-semibold">Current Bid</p>
-                  <p className="text-7xl font-extrabold text-amber-400">
-                    ₹{displayAP.current_bid > 0 ? displayAP.current_bid : displayAP.base_price}
+                <div className="relative overflow-hidden rounded-3xl border border-amber-400/30 bg-gradient-to-b from-amber-500/[0.08] to-white/[0.02] px-8 py-10 mb-6 shadow-[0_0_80px_-24px_rgba(251,191,36,0.4)]">
+                  <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-3xl">
+                    <span
+                      key={`${displayAP.current_bid}-${displayAP.current_bidder_id}`}
+                      className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-white/[0.12] to-transparent animate-sheen"
+                    />
+                  </div>
+                  <p className="relative text-white/50 text-sm uppercase tracking-[0.3em] mb-4 font-semibold">
+                    {lastBidInfo ? "Current bid" : "Opening bid"}
                   </p>
+                  <div className="relative flex justify-center">
+                    <BidAmount
+                      size="xl"
+                      amount={displayAP.current_bid > 0 ? displayAP.current_bid : displayAP.base_price}
+                      resetKey={displayAP.id}
+                      pulseKey={`${displayAP.current_bid}-${displayAP.current_bidder_id ?? ""}`}
+                    />
+                  </div>
                   {lastBidInfo && (
-                    <p className="text-xl text-gray-300 mt-3">
-                      by <span className="font-bold text-white bg-gray-800 px-3 py-1 rounded-lg ml-2">{getTeamName(lastBidInfo.captain_id)}</span>
-                    </p>
+                    <div
+                      key={lastBidInfo.captain_id}
+                      className="relative mt-6 inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 pl-3 pr-5 py-2 animate-fade-up"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="w-3.5 h-3.5 rounded-full"
+                        style={(() => {
+                          const c = store.teams.find((t) => t.captain_id === lastBidInfo.captain_id)?.color || "#f59e0b";
+                          return { background: c, boxShadow: `0 0 16px ${c}` };
+                        })()}
+                      />
+                      <span className="text-xs uppercase tracking-[0.2em] text-white/50">Leading</span>
+                      <span className="text-xl font-semibold text-white">{getTeamName(lastBidInfo.captain_id)}</span>
+                    </div>
                   )}
                 </div>
               )}
@@ -697,42 +741,19 @@ export default function SpectatePage() {
               {allPlayersFiltered.length === 0 ? (
                 <p className="text-xs text-gray-500 text-center py-4 bg-gray-800/50 rounded-xl">No players found</p>
               ) : (
-                  allPlayersFiltered.map((p) => {
+                  allPlayersFiltered.map((p, i) => {
                     const teamName = getTeamNameForPlayer(p.player_id);
-
                     return (
-                      <div key={p.id} className="flex items-center gap-2 bg-gray-800 rounded-xl p-2.5">
-                        {playerPhotos[p.player_id] ? (
-                          <div className="w-7 h-7 rounded-full overflow-hidden shrink-0">
-                            <img src={playerPhotos[p.player_id] as string} alt="" className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-[11px] text-gray-400 shrink-0">
-                            {(playerNames[p.player_id] || "?")[0]?.toUpperCase()}
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-gray-200 font-medium truncate">
-                            {playerNames[p.player_id] || `#${p.player_id}`}
-                          </p>
-                          {teamName && (
-                            <p className="text-[10px] text-gray-500 truncate">{teamName}</p>
-                          )}
-                        </div>
-                        {p.status === "pending" ? (
-                          <span className="text-gray-500 text-[10px] font-semibold px-1.5 py-0.5 bg-gray-700 rounded shrink-0">
-                            PENDING
-                          </span>
-                        ) : p.status === "unsold" ? (
-                          <span className="text-red-400 text-[10px] font-semibold px-1.5 py-0.5 bg-red-500/10 rounded shrink-0">
-                            UNSOLD
-                          </span>
-                        ) : (
-                          <span className="text-green-400 font-semibold text-xs shrink-0">
-                            ₹{p.current_bid}
-                          </span>
-                        )}
-                      </div>
+                      <PlayerListCard
+                        key={p.id}
+                        index={i}
+                        size="sm"
+                        name={playerNames[p.player_id] || `#${p.player_id}`}
+                        photo={playerPhotos[p.player_id]}
+                        status={p.status}
+                        price={p.status === "sold" ? p.current_bid : undefined}
+                        subtitle={teamName ?? undefined}
+                      />
                     );
                   })
                 )}

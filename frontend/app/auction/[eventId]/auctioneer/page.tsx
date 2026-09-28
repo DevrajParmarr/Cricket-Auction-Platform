@@ -6,7 +6,13 @@ import api from "@/lib/api";
 import { useAuctionStore, PlayerState } from "@/store/auction";
 import { AuctionSocket } from "@/lib/ws";
 import AuctionPlayerCard from "@/components/AuctionPlayerCard";
+import PlayerListCard from "@/components/auction/PlayerListCard";
+import { formatINR } from "@/components/auction/format";
+import { GavelIcon } from "@/components/auction/icons";
 import TeamSummary from "@/components/TeamSummary";
+
+const LIST_ACTION_BTN =
+  "inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2.5 py-1.5 text-xs font-semibold text-amber-300 transition hover:bg-amber-400/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 disabled:cursor-not-allowed disabled:opacity-40";
 
 export default function AuctioneerPage() {
   const router = useRouter();
@@ -209,6 +215,8 @@ export default function AuctioneerPage() {
     return team ? team.name : playerNames[captainId] || `Captain #${captainId}`;
   };
 
+  const getTeamColor = (captainId: number) => store.teams.find((t) => t.captain_id === captainId)?.color;
+
   if (checkingAccess) {
     return (
       <div className="min-h-screen p-6 bg-gray-950 flex items-center justify-center text-gray-400">
@@ -324,6 +332,9 @@ export default function AuctioneerPage() {
                     ? getTeamName(displayActiveAP.current_bidder_id)
                     : undefined
                 }
+                currentBidderColor={
+                  displayActiveAP.current_bidder_id ? getTeamColor(displayActiveAP.current_bidder_id) : undefined
+                }
                 timer={store.timer}
                 status={displayActiveAP.status}
               />
@@ -356,41 +367,29 @@ export default function AuctioneerPage() {
                     No pending players
                   </div>
                 ) : (
-                  pendingPlayers.map((p) => (
-                    <div
+                  pendingPlayers.map((p, i) => (
+                    <PlayerListCard
                       key={p.id}
-                      className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-gray-900 to-gray-900/70 px-3 py-2"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2 min-w-0">
-                          {playerPhotos[p.player_id] ? (
-                            <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 ring-1 ring-gray-700">
-                              <img src={playerPhotos[p.player_id]} alt="" className="w-full h-full object-cover" />
-                            </div>
-                          ) : (
-                            <div className="w-6 h-6 rounded-full bg-gray-800 flex items-center justify-center text-[10px] text-gray-500 shrink-0 ring-1 ring-gray-700">
-                              {(playerNames[p.player_id] || "?")[0]?.toUpperCase()}
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <p className="text-sm text-gray-100 truncate">{playerNames[p.player_id] || `#${p.player_id}`}</p>
-                            <p className="text-[11px] text-gray-500">Base ₹{p.base_price}</p>
-                          </div>
-                        </div>
-                        <span className="badge-pending shrink-0">Pending</span>
-                      </div>
-                      {status !== "completed" && (
-                        <div className="mt-2 flex justify-end">
+                      index={i}
+                      name={playerNames[p.player_id] || `#${p.player_id}`}
+                      photo={playerPhotos[p.player_id]}
+                      status="pending"
+                      showStatus={false}
+                      subtitle={`Base ${formatINR(p.base_price)}`}
+                      action={
+                        status !== "completed" && (
                           <button
-                            className="text-xs btn-secondary py-1 px-2 shrink-0"
+                            className={LIST_ACTION_BTN}
                             onClick={() => nextPlayer(p.id)}
                             disabled={status !== "active"}
+                            aria-label={`Put ${playerNames[p.player_id] || "player"} up for auction`}
                           >
+                            <GavelIcon className="w-3.5 h-3.5" />
                             Pick
                           </button>
-                        </div>
-                      )}
-                    </div>
+                        )
+                      }
+                    />
                   ))
                 )}
               </div>
@@ -406,34 +405,17 @@ export default function AuctioneerPage() {
                     No sold players yet
                   </div>
                 ) : (
-                  soldPlayers.map((p) => {
-                    const soldToTeam = p.current_bidder_id ? getTeamName(p.current_bidder_id) : "Unknown Team";
-                    return (
-                      <div
-                        key={p.id}
-                        className="rounded-lg border border-green-500/20 bg-gradient-to-r from-gray-900 to-gray-900/70 px-3 py-2"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {playerPhotos[p.player_id] ? (
-                              <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 ring-1 ring-gray-700">
-                                <img src={playerPhotos[p.player_id]} alt="" className="w-full h-full object-cover" />
-                              </div>
-                            ) : (
-                              <div className="w-6 h-6 rounded-full bg-gray-800 flex items-center justify-center text-[10px] text-gray-500 shrink-0 ring-1 ring-gray-700">
-                                {(playerNames[p.player_id] || "?")[0]?.toUpperCase()}
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-sm text-gray-100 truncate">{playerNames[p.player_id] || `#${p.player_id}`}</p>
-                              <p className="text-[11px] text-gray-500 truncate">Sold to {soldToTeam}</p>
-                            </div>
-                          </div>
-                          <span className="badge-sold whitespace-nowrap shrink-0">₹{p.current_bid}</span>
-                        </div>
-                      </div>
-                    );
-                  })
+                  soldPlayers.map((p, i) => (
+                    <PlayerListCard
+                      key={p.id}
+                      index={i}
+                      name={playerNames[p.player_id] || `#${p.player_id}`}
+                      photo={playerPhotos[p.player_id]}
+                      status="sold"
+                      price={p.current_bid}
+                      subtitle={`Sold to ${p.current_bidder_id ? getTeamName(p.current_bidder_id) : "Unknown Team"}`}
+                    />
+                  ))
                 )}
               </div>
             </div>
@@ -448,46 +430,31 @@ export default function AuctioneerPage() {
                     No unsold players yet
                   </div>
                 ) : (
-                  unsoldPlayers.map((p) => {
+                  unsoldPlayers.map((p, i) => {
                     const hasAnyBid = p.current_bid > p.base_price;
+                    const canReauction = status !== "completed" && pendingPlayers.length === 0;
                     return (
-                      <div
+                      <PlayerListCard
                         key={p.id}
-                        className="rounded-lg border border-red-500/20 bg-gradient-to-r from-gray-900 to-gray-900/70 px-3 py-2"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {playerPhotos[p.player_id] ? (
-                              <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 ring-1 ring-gray-700">
-                                <img src={playerPhotos[p.player_id]} alt="" className="w-full h-full object-cover" />
-                              </div>
-                            ) : (
-                              <div className="w-6 h-6 rounded-full bg-gray-800 flex items-center justify-center text-[10px] text-gray-500 shrink-0 ring-1 ring-gray-700">
-                                {(playerNames[p.player_id] || "?")[0]?.toUpperCase()}
-                              </div>
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-sm text-gray-100 truncate">{playerNames[p.player_id] || `#${p.player_id}`}</p>
-                              <p className="text-[11px] text-gray-500">
-                                {hasAnyBid ? `Last bid ₹${p.current_bid}` : `Base ₹${p.base_price} - no bids`}
-                              </p>
-                            </div>
-                          </div>
-                          <span className="badge-unsold shrink-0">Unsold</span>
-                        </div>
-                        {status !== "completed" && pendingPlayers.length === 0 && (
-                          <div className="mt-2 flex justify-end">
+                        index={i}
+                        name={playerNames[p.player_id] || `#${p.player_id}`}
+                        photo={playerPhotos[p.player_id]}
+                        status="unsold"
+                        showStatus={!canReauction}
+                        subtitle={hasAnyBid ? `Last bid ${formatINR(p.current_bid)}` : `Base ${formatINR(p.base_price)} · no bids`}
+                        action={
+                          canReauction && (
                             <button
-                              className={`text-xs btn-secondary py-1 px-2 ${isTimerRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+                              className={LIST_ACTION_BTN}
                               onClick={() => nextPlayer(p.id)}
                               disabled={status !== "active" || isTimerRunning}
                               title={isTimerRunning ? "Wait for current timer to finish before re-auctioning" : ""}
                             >
                               Re-auction
                             </button>
-                          </div>
-                        )}
-                      </div>
+                          )
+                        }
+                      />
                     );
                   })
                 )}

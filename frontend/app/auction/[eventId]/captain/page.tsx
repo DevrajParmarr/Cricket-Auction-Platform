@@ -7,6 +7,8 @@ import { useAuctionStore } from "@/store/auction";
 import { useAuthStore } from "@/store/auth";
 import { AuctionSocket } from "@/lib/ws";
 import AuctionPlayerCard from "@/components/AuctionPlayerCard";
+import PlayerAvatar from "@/components/auction/PlayerAvatar";
+import PlayerListCard from "@/components/auction/PlayerListCard";
 
 interface TeamDetail {
   id: number;
@@ -421,6 +423,11 @@ export default function CaptainPage() {
                 basePrice={activeAP.base_price}
                 currentBid={activeAP.current_bid}
                 currentBidderName={activeAP.current_bidder_id ? getTeamName(activeAP.current_bidder_id) : undefined}
+                currentBidderColor={
+                  activeAP.current_bidder_id
+                    ? store.teams.find((t) => t.captain_id === activeAP.current_bidder_id)?.color
+                    : undefined
+                }
                 timer={store.timer}
                 status={activeAP.status}
               />
@@ -473,17 +480,6 @@ export default function CaptainPage() {
                     ? "bg-green-500/10 border-green-500/40"
                     : "bg-red-500/10 border-red-500/40"
                 }`}>
-                  {activeAP.status === "sold" && (
-                    <div className="absolute inset-0 pointer-events-none">
-                      <div className="absolute -top-2 left-4 text-2xl animate-bounce">🎉</div>
-                      <div className="absolute -top-2 right-6 text-2xl animate-bounce [animation-delay:120ms]">✨</div>
-                    </div>
-                  )}
-                  {activeAP.status === "unsold" && (
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <div className="text-red-400/20 text-[110px] font-black leading-none select-none animate-pulse">✕</div>
-                    </div>
-                  )}
                   <p className={`text-lg font-bold ${iWonPlayer ? "text-green-300" : "text-amber-300"}`}>
                     {iWonPlayer ? "You got the player!" : activeAP.status === "sold" ? "Player Sold" : "Player Unsold"}
                   </p>
@@ -615,20 +611,17 @@ export default function CaptainPage() {
             </h3>
             {myTeam && myTeam.players.length > 0 ? (
               <div className="space-y-1.5">
-                {myTeam.players.map((tp) => (
-                  <div key={tp.id} className="flex items-center gap-2 bg-gray-800 rounded-xl px-2.5 py-2">
-                    {playerPhotos[tp.player_id] ? (
-                      <div className="w-7 h-7 rounded-full overflow-hidden shrink-0">
-                        <img src={playerPhotos[tp.player_id]} alt="" className="w-full h-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-[11px] text-gray-400 shrink-0">
-                        {(playerNames[tp.player_id] || "?")[0]?.toUpperCase()}
-                      </div>
-                    )}
-                    <span className="text-sm flex-1 truncate">{playerNames[tp.player_id] || `Player #${tp.player_id}`}</span>
-                    <span className="text-green-400 text-xs font-semibold shrink-0">₹{tp.sold_price}</span>
-                  </div>
+                {myTeam.players.map((tp, i) => (
+                  <PlayerListCard
+                    key={tp.id}
+                    index={i}
+                    size="sm"
+                    name={playerNames[tp.player_id] || `Player #${tp.player_id}`}
+                    photo={playerPhotos[tp.player_id]}
+                    status="sold"
+                    price={tp.sold_price}
+                    subtitle={tp.sold_price === 0 ? "Captain" : undefined}
+                  />
                 ))}
               </div>
             ) : (
@@ -725,19 +718,12 @@ export default function CaptainPage() {
                       }`}
                       onClick={() => toggleBookmark(p.id)}
                     >
-                      {playerPhotos[p.player_id] ? (
-                        <div className="w-7 h-7 rounded-full overflow-hidden shrink-0">
-                          <img
-                            src={playerPhotos[p.player_id]}
-                            alt=""
-                            className={`w-full h-full object-cover ${p.status === "unsold" ? "grayscale opacity-60" : ""}`}
-                          />
-                        </div>
-                      ) : (
-                        <div className={`w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-[11px] shrink-0 ${p.status === "unsold" ? "text-gray-600 opacity-60" : "text-gray-400"}`}>
-                          {(playerNames[p.player_id] || "?")[0]?.toUpperCase()}
-                        </div>
-                      )}
+                      <PlayerAvatar
+                        name={playerNames[p.player_id] || `Player #${p.player_id}`}
+                        photo={playerPhotos[p.player_id]}
+                        size="sm"
+                        tone={p.status === "unsold" ? "unsold" : "none"}
+                      />
                       <span className={`text-xs flex-1 truncate ${p.status === "unsold" ? "text-gray-500" : "text-gray-200"}`}>
                         {playerNames[p.player_id] || `Player #${p.player_id}`}
                       </span>

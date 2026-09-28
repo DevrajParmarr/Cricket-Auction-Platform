@@ -674,7 +674,11 @@ export default function OrganizerEventDetailPage() {
   }, [eid]);
 
   useEffect(() => {
-    fetchAll().catch(() => router.push("/auth/login"));
+    fetchAll().catch((err: unknown) => {
+      // Only a missing/expired session means "log in"; not organizing this event goes back to the dashboard
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      router.push(status === 401 ? "/auth/login" : "/dashboard");
+    });
   }, [eid, fetchAll]);
 
   const addPlayer = async (playerId: number) => {

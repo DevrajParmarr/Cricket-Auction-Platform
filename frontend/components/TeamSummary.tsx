@@ -1,82 +1,86 @@
 "use client";
 
 import { TeamState } from "@/store/auction";
-
-function isDark(hex: string) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return (r * 299 + g * 587 + b * 114) / 1000 < 128;
-}
+import PlayerAvatar from "@/components/auction/PlayerAvatar";
+import { formatINR } from "@/components/auction/format";
+import { ChevronDownIcon } from "@/components/auction/icons";
 
 interface Props {
   teams: TeamState[];
   highlightCaptainId?: number | null;
   teamRosters?: Record<number, { player_id: number; sold_price: number }[]>;
   playerNames?: Record<number, string>;
+  playerPhotos?: Record<number, string>;
+  /** Force one column, for narrow side panels */
+  singleColumn?: boolean;
 }
 
-export default function TeamSummary({ teams, highlightCaptainId, teamRosters = {}, playerNames = {} }: Props) {
+export default function TeamSummary({ teams, highlightCaptainId, teamRosters = {}, playerNames = {}, playerPhotos = {}, singleColumn = false }: Props) {
+  if (teams.length === 0) {
+    return <p className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-sm text-white/50">No teams yet.</p>;
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-3">
-      {teams.map((team) => {
+    <div className={`grid grid-cols-1 gap-3 ${singleColumn ? "" : "sm:grid-cols-2"}`}>
+      {teams.map((team, i) => {
         const remaining = team.budget - team.spent;
-        const pct = team.budget > 0 ? (team.spent / team.budget) * 100 : 0;
-        const isHighlighted = team.captain_id === highlightCaptainId;
+        const leftPct = team.budget > 0 ? Math.max(0, (remaining / team.budget) * 100) : 0;
+        const isMine = team.captain_id != null && team.captain_id === highlightCaptainId;
         const color = team.color || "#3B82F6";
-        const textColor = isDark(color) ? "white" : "#111827";
         const roster = teamRosters[team.id] || [];
+        const low = remaining < team.budget * 0.2;
 
         return (
           <details
             key={team.id}
-            className={`rounded-xl overflow-hidden border-2 transition-all group ${
-              isHighlighted ? "border-white/40 scale-[1.02]" : "border-transparent"
+            className={`group overflow-hidden rounded-2xl border bg-white/[0.03] animate-fade-up ${
+              isMine ? "border-amber-400/50 shadow-[0_0_30px_-12px_rgba(251,191,36,0.5)]" : "border-white/10"
             }`}
+            style={{ animationDelay: `${i * 40}ms` }}
           >
-            <summary className="list-none cursor-pointer">
-              {/* Color header */}
-              <div className="px-3 py-2" style={{ backgroundColor: color }}>
-                <p className="font-bold text-sm truncate" style={{ color: textColor }}>
+            <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 min-h-[64px] [&::-webkit-details-marker]:hidden focus-visible:outline-none focus-visible:bg-white/5">
+              <span aria-hidden="true" className="h-9 w-1.5 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 12px ${color}` }} />
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 truncate font-display text-lg font-bold uppercase tracking-wide text-white">
                   {team.name}
+                  {isMine && <span className="rounded bg-amber-400/15 px-1.5 py-0.5 font-sans text-[10px] font-bold tracking-wider text-amber-300">YOU</span>}
                 </p>
-                <p className="text-xs" style={{ color: isDark(color) ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)" }}>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${leftPct}%`, background: color }} />
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className={`font-display text-lg font-bold tabular-nums leading-none ${low ? "text-red-300" : "text-emerald-300"}`}>
+                  {formatINR(remaining)}
+                </p>
+                <p className="mt-1 text-[11px] text-white/50 tabular-nums">
                   {team.player_count}/{team.max_players} players
                 </p>
               </div>
-
-              {/* Budget bar */}
-              <div className="bg-gray-900 px-3 py-2">
-                <div className="w-full bg-gray-800 rounded-full h-1.5 mb-1.5">
-                  <div
-                    className="h-1.5 rounded-full transition-all"
-                    style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: color }}
-                  />
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-gray-500">Spent: {team.spent}</span>
-                  <div className="flex items-center gap-2">
-                    <span className={remaining < team.budget * 0.2 ? "text-red-400" : "text-green-400"}>
-                      Left: {remaining}
-                    </span>
-                    <span className="text-gray-500 group-open:rotate-180 transition-transform duration-200">▾</span>
-                  </div>
-                </div>
-              </div>
+              <ChevronDownIcon className="w-4 h-4 shrink-0 text-white/40 transition-transform duration-200 group-open:rotate-180" />
             </summary>
-            <div className="bg-gray-900 border-t border-gray-800 px-3 py-2">
-              <p className="text-[10px] uppercase tracking-wide text-gray-500 mb-2">Players</p>
+
+            <div className="border-t border-white/10 px-3 py-3">
+              <p className="mb-2 px-1 text-[11px] text-white/45">
+                Spent <span className="font-semibold text-white/70 tabular-nums">{formatINR(team.spent)}</span> of {formatINR(team.budget)}
+              </p>
               {roster.length === 0 ? (
-                <p className="text-xs text-gray-600 italic">No players yet</p>
+                <p className="px-1 text-xs italic text-white/40">No players yet</p>
               ) : (
-                <div className="space-y-1 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
-                  {roster.map((rp, idx) => (
-                    <div key={`${team.id}-${rp.player_id}-${idx}`} className="flex items-center justify-between text-xs bg-gray-800/70 rounded px-2 py-1">
-                      <span className="text-gray-300 truncate">{playerNames[rp.player_id] || `Player #${rp.player_id}`}</span>
-                      <span className="text-amber-400 font-medium">₹{rp.sold_price}</span>
-                    </div>
-                  ))}
-                </div>
+                <ul className="space-y-1.5">
+                  {roster.map((rp, idx) => {
+                    const name = playerNames[rp.player_id] || `Player #${rp.player_id}`;
+                    return (
+                      <li key={`${team.id}-${rp.player_id}-${idx}`} className="flex items-center gap-2.5 rounded-lg bg-white/[0.04] px-2 py-1.5">
+                        <PlayerAvatar name={name} photo={playerPhotos[rp.player_id]} size="xs" />
+                        <span className="flex-1 truncate text-sm text-white/85">{name}</span>
+                        <span className="font-display font-semibold tabular-nums text-amber-300">
+                          {rp.sold_price === 0 ? "Captain" : formatINR(rp.sold_price)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
             </div>
           </details>

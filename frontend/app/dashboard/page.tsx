@@ -45,6 +45,9 @@ export default function DashboardPage() {
       }
       const parsedUser = JSON.parse(stored);
       useAuthStore.getState().setAuth(parsedUser, token);
+      // Keep the chosen captain/auctioneer panel across refreshes
+      const panel = localStorage.getItem("activePanel");
+      if (panel && (parsedUser.roles ?? []).includes(panel)) useAuthStore.getState().setActivePanel(panel);
     }
   }, [user, router]);
 
@@ -91,18 +94,19 @@ export default function DashboardPage() {
   // Filter draft and completed events from "Upcoming Events" tab (only show ready/active/paused)
   const filteredAllEvents = allEvents.filter((e) => e.status !== "completed" && e.status !== "draft");
   
-  // If activePanel is "captain", filter to only show events where user is captain
+  // Captain and auctioneer panels only show the events where the user holds that role
+  const rolePanel = activePanel === "captain" || activePanel === "auctioneer" ? activePanel : null;
   const getFilteredMyEvents = () => {
-    if (activePanel === "captain") {
-      return myEvents.filter((e) => e.my_roles.includes("captain"));
+    if (rolePanel) {
+      return myEvents.filter((e) => e.my_roles.includes(rolePanel));
     }
     return myEvents;
   };
-  
-  // When in captain mode, always show captain events; otherwise use tab selection
+
+  // In a role panel, always show that role's events; otherwise use tab selection
   const displayEvents = sortEvents(
-    activePanel === "captain" 
-      ? getFilteredMyEvents() 
+    rolePanel
+      ? getFilteredMyEvents()
       : (activeTab === "mine" ? getFilteredMyEvents() : filteredAllEvents)
   );
 
@@ -204,19 +208,23 @@ export default function DashboardPage() {
           {/* Hero greeting */}
           <div className="mb-8">
             <h1 className="text-3xl font-extrabold mb-1">
-              {activePanel === "captain" ? "Captain Dashboard ⚡" : `Hey ${user?.name?.split(" ")[0]} 👋`}
+              {activePanel === "captain"
+                ? "Captain Dashboard ⚡"
+                : activePanel === "auctioneer"
+                ? "Auctioneer Dashboard 🔨"
+                : `Hey ${user?.name?.split(" ")[0]} 👋`}
             </h1>
             <p className="text-gray-500">
-              {activePanel === "captain"
-                ? `You're captain in ${getFilteredMyEvents().length} event${getFilteredMyEvents().length !== 1 ? "s" : ""}.`
+              {rolePanel
+                ? `You're ${rolePanel === "captain" ? "captain" : "the auctioneer"} in ${getFilteredMyEvents().length} event${getFilteredMyEvents().length !== 1 ? "s" : ""}.`
                 : myEvents.length > 0
                 ? `You're part of ${myEvents.length} auction event${myEvents.length > 1 ? "s" : ""}.`
                 : "Browse events below or wait to be added by an organizer."}
             </p>
           </div>
 
-          {/* Tab switcher - hide when in captain mode */}
-          {activePanel !== "captain" && (
+          {/* Tab switcher - hide in captain/auctioneer mode */}
+          {!rolePanel && (
             <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit mb-6">
               {(["all", "mine"] as const).map((tab) => (
                 <button

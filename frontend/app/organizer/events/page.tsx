@@ -15,12 +15,18 @@ export default function OrganizerEventsPage() {
   const router = useRouter();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<"forbidden" | "failed" | null>(null);
 
   useEffect(() => {
     api
       .get("/organizer/events")
       .then(({ data }) => setEvents(data))
-      .catch(() => router.push("/auth/login"))
+      .catch((err) => {
+        // 401 = not signed in; 403 = signed in but not an organizer (don't pretend they're logged out)
+        const status = err?.response?.status;
+        if (status === 401) router.push("/auth/login");
+        else setLoadError(status === 403 ? "forbidden" : "failed");
+      })
       .finally(() => setLoading(false));
   }, [router]);
 
@@ -34,6 +40,16 @@ export default function OrganizerEventsPage() {
 
         {loading ? (
           <p className="text-gray-500">Loading...</p>
+        ) : loadError ? (
+          <div className="card text-center py-10">
+            <p className="text-white font-semibold">
+              {loadError === "forbidden" ? "This page is for event organizers." : "Couldn't load your events."}
+            </p>
+            <p className="text-gray-500 mt-2">
+              {loadError === "forbidden" ? "Your account doesn't have the organizer role." : "Check your connection and try again."}
+            </p>
+            <a href="/dashboard" className="btn-primary inline-block mt-5">Go to dashboard</a>
+          </div>
         ) : events.length === 0 ? (
           <div className="card text-center text-gray-500 py-10">
             No events assigned. Ask admin to assign you as organizer.

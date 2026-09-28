@@ -76,6 +76,7 @@ async def get_auction_state(event_id: int, db: AsyncSession) -> dict:
             {
                 "id": t.id,
                 "name": t.name,
+                "color": t.color,
                 "captain_id": t.captain_id,
                 "budget": t.budget,
                 "spent": t.spent,
@@ -542,7 +543,8 @@ async def place_bid(
     if ap.current_bidder_id == captain_id:
         raise ValueError("Wait for another team to bid before bidding again")
 
-    if amount <= ap.current_bid:
+    # The opening bid may equal the base price (checked below); every later bid must beat the current one
+    if ap.current_bidder_id is not None and amount <= ap.current_bid:
         raise ValueError(f"Bid must be higher than current bid ({ap.current_bid})")
 
     # Tiered minimum bid increment based on current bid
